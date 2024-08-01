@@ -5,22 +5,27 @@ const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const { authenticateToken, hashPassword, comparePassword } = require('./auth');
 const sendEmail = require('./email');
+const { createTablesIfNotExists } = require('./createTable'); // Import the function
 
 const app = express();
 app.use(express.json());
 app.use(cors()); // Enable CORS for all routes
 
+// Call the function to create tables when server starts
+createTablesIfNotExists();
+
+// PostgreSQL connection setup
 const pool = new Pool({
-    user: 'sureshift_user',
+    user: 'postgres',
     host: 'localhost',
     database: 'sureshift',
-    password: 'AeVUcQexRXjgLHgRbN6SLG2ULcXUhlCe',
+    password: 'Abhi@123',
     port: 5432,
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false
 });
 
-// Admin registration---------------------------------------------------------------------------
+// Admin registration
 app.post('/admin/register', async (req, res) => {
     const { username, password } = req.body;
     console.log(req.body);
@@ -35,7 +40,7 @@ app.post('/admin/register', async (req, res) => {
     }
 });
 
-// Admin login-------------------------------------------------------------------------------------
+// Admin login
 app.post('/admin/login', async (req, res) => {
     const { username, password } = req.body;
 
@@ -48,16 +53,14 @@ app.post('/admin/login', async (req, res) => {
         if (!validPassword) return res.status(400).send('Invalid password');
 
         const token = jwt.sign({ id: admin.id }, process.env.TOKEN_SECRET, { expiresIn: '1h' });
-        // res.header('Authorization', token).send('Logged in');
         console.log(token);
-        res.header('Authorization', `Bearer ${token}`).send({token});
+        res.header('Authorization', `Bearer ${token}`).send({ token });
     } catch (error) {
         res.status(500).send('Error logging in');
     }
-    
 });
 
-// Get user details by ID---------------------------------------------------------------
+// Get user details by ID
 app.get('/users/:id', async (req, res) => {
     const { id } = req.params;
 
@@ -72,12 +75,16 @@ app.get('/users/:id', async (req, res) => {
     }
 });
 
-// Get all users------------------------------------------------------------------------
+// Get all users
 app.get('/users', async (req, res) => {
     try {
-        const result = await pool.query(`select us.entry_date,us.name,us.email,us.phone,us.pickup_date,
-us.pickup_time,us.pickup_address,us.drop_address,us.order_id,us.purpose,s.status 
-from users as us full outer join status as s on us.order_id = s.order_id order by us.id desc`);
+        const result = await pool.query(`
+            SELECT us.entry_date, us.name, us.email, us.phone, us.pickup_date, us.pickup_time, 
+                   us.pickup_address, us.drop_address, us.order_id, us.purpose, s.status 
+            FROM users AS us 
+            FULL OUTER JOIN status AS s ON us.order_id = s.order_id 
+            ORDER BY us.id DESC
+        `);
         if (result.rows.length === 0) {
             return res.status(404).send('Users not found');
         }
@@ -87,15 +94,18 @@ from users as us full outer join status as s on us.order_id = s.order_id order b
     }
 });
 
-// Get all completeInfo------------------------------------------------------------------------
+// Get all completeInfo
 app.post('/completeInfo', async (req, res) => {
     console.log(req.body);
     const order_id = req.body.order_id;
     try {
-        const result = await pool.query(`select us.name,us.email,us.phone,us.pickup_date,
-us.pickup_time,us.pickup_address,us.drop_address,us.order_id,us.purpose,s.status 
-from users as us full outer join status as s on us.order_id = s.order_id
-where us.order_id = '${order_id}'`);
+        const result = await pool.query(`
+            SELECT us.name, us.email, us.phone, us.pickup_date, us.pickup_time, us.pickup_address, 
+                   us.drop_address, us.order_id, us.purpose, s.status 
+            FROM users AS us 
+            FULL OUTER JOIN status AS s ON us.order_id = s.order_id
+            WHERE us.order_id = $1
+        `, [order_id]);
         if (result.rows.length === 0) {
             return res.status(404).send('Users not found');
         }
@@ -106,7 +116,7 @@ where us.order_id = '${order_id}'`);
     }
 });
 
-// Add status------------------------------------------------------------------------------
+// Add status
 app.post('/status', async (req, res) => {
     const { order_id, status } = req.body;
 
@@ -125,9 +135,7 @@ app.post('/status', async (req, res) => {
     }
 });
 
-
-// Add user details and send email ---------------------------------------------------------
-
+// Add user details and send email
 const crypto = require('crypto');
 
 // Function to generate a 20-digit unique order ID with a prefix
@@ -142,7 +150,7 @@ const sendConfirmationEmail = async (userEmail, orderDetails) => {
     await sendEmail(userEmail, subject, text);
 };
 
-// user detail send
+// Add user details and send email
 app.post('/user', async (req, res) => {
     const { name, email, phone, pickup_date, pickup_time, pickup_address, drop_address, purpose } = req.body;
     console.log(req.body);
@@ -158,18 +166,22 @@ app.post('/user', async (req, res) => {
 
         const orderDetails = `Order ID: ${order_id}\nName: ${name}\nEmail: ${email}\nPhone: ${phone}\nPickup Date: ${pickup_date}\nPickup Time: ${pickup_time}\nPickup Address: ${pickup_address}\nDrop Address: ${drop_address}\nPurpose: ${purpose}`;
 
-        // Send email to the user
-        await sendConfirmationEmail(email, orderDetails);
-
-        // Send email to the company
-        await sendEmail(process.env.COMPANY_EMAIL, 'New Pickup Request', orderDetails);
-
-        res.status(201).send('User details added successfully and emails sent');
+        // Send emails asynchronously
+        Promise.all([
+            sendConfirmationEmail(email, orderDetails),
+            sendEmail(process.env.COMPANY_EMAIL, 'New Pickup Request', orderDetails)
+        ]).then(() => {
+            res.status(201).send('User details added successfully and emails sent');
+        }).catch(error => {
+            console.error('Error sending emails:', error);
+            res.status(500).send('User details added successfully, but email sending failed');
+        });
     } catch (error) {
         console.error('Error adding user details:', error);
         res.status(400).send('Error adding user details');
     }
 });
+
 
 app.listen(4000, () => {
     console.log('Server is running on port 4000');
