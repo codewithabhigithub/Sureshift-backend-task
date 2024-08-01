@@ -11,10 +11,10 @@ app.use(express.json());
 app.use(cors()); // Enable CORS for all routes
 
 const pool = new Pool({
-    user: 'postgres',
+    user: 'sureshift_user',
     host: 'localhost',
     database: 'sureshift',
-    password: 'Abhi@123',
+    password: 'AeVUcQexRXjgLHgRbN6SLG2ULcXUhlCe',
     port: 5432,
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false
